@@ -199,7 +199,7 @@ class TicketTracker:
         alert_config = self.config.get("alerts", {}).get("sms", {})
 
         if alert_config.get("enabled", False):
-            required_fields = ["account_sid", "auth_token", "from_number", "to_number"]
+            required_fields = ["smtp_email", "smtp_password", "phone_number", "carrier"]
             missing = [f for f in required_fields if not alert_config.get(f)]
 
             if missing:
@@ -210,17 +210,20 @@ class TicketTracker:
 
             try:
                 self.sms_alert = SMSAlert(
-                    account_sid=alert_config["account_sid"],
-                    auth_token=alert_config["auth_token"],
-                    from_number=alert_config["from_number"],
-                    to_number=alert_config["to_number"],
+                    smtp_email=alert_config["smtp_email"],
+                    smtp_password=alert_config["smtp_password"],
+                    phone_number=alert_config["phone_number"],
+                    carrier=alert_config["carrier"],
+                    smtp_provider=alert_config.get("smtp_provider", "gmail"),
+                    smtp_host=alert_config.get("smtp_host"),
+                    smtp_port=alert_config.get("smtp_port"),
                     max_alerts_per_hour=alert_config.get("max_alerts_per_hour", 5),
                     quiet_hours=(
                         alert_config.get("quiet_hours_start", 23),
                         alert_config.get("quiet_hours_end", 7),
                     ),
                 )
-                logger.info("SMS alerts initialized")
+                logger.info("SMS alerts initialized via email-to-SMS gateway")
             except Exception as e:
                 logger.error(f"Failed to init SMS alerts: {e}")
 

@@ -142,7 +142,9 @@ def main():
         print(f"SMS alerts: {'Enabled' if status['sms_alerts_enabled'] else 'Disabled'}")
         if status.get("sms_status"):
             sms = status["sms_status"]
-            print(f"  To: {sms['to_number']}")
+            print(f"  Phone: {sms['phone_number']} ({sms['carrier']})")
+            print(f"  Gateway: {sms['sms_gateway']}")
+            print(f"  Via email: {sms['smtp_email']}")
             print(f"  Alerts last hour: {sms['alerts_sent_last_hour']}/{sms['max_alerts_per_hour']}")
             print(f"  Quiet hours: {sms['quiet_hours']}")
             print(f"  Currently quiet: {sms['quiet_hours_active']}")

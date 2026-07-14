@@ -21,7 +21,7 @@ This tracker normalizes everything to **true all-in cost** so you can make apple
 
 - **6-platform monitoring** — SeatGeek, TickPick, Gametime, StubHub, Vivid Seats, Ticketmaster Resale
 - **Fee normalization** — Shows true all-in price accounting for each platform's fee structure
-- **SMS alerts via Twilio** — Get notified instantly when prices hit your target
+- **SMS alerts via Email-to-SMS gateway** — 100% free, no Twilio, uses your Gmail/Outlook
 - **Smart alerting** — Price drop alerts, new all-time low alerts, buy/wait recommendations
 - **Price history tracking** — Records prices over time to identify trends
 - **Trend analysis** — Tells you if prices are dropping (wait) or rising (buy now)
@@ -52,10 +52,39 @@ Only SeatGeek requires a key. The others work via web scraping out of the box.
 | Service | Required? | Free Tier | Link |
 |---------|-----------|-----------|------|
 | **SeatGeek API** | Yes | 1000 req/day | https://seatgeek.com/account/develop |
-| **Twilio SMS** | Yes (for alerts) | $15 credit | https://www.twilio.com |
+| **Gmail (for SMS)** | Yes (for alerts) | Free forever | https://myaccount.google.com/apppasswords |
 | **Ticketmaster API** | Optional | 5000 req/day | https://developer.ticketmaster.com |
 
-> **Note**: TickPick, Gametime, StubHub, and Vivid Seats work immediately with no API key.
+> **Note**: SMS alerts use the free Email-to-SMS gateway (no Twilio, no paid services). You just need a Gmail account with an App Password.
+
+#### SMS Setup (Free via Email-to-SMS Gateway)
+
+Instead of Twilio, we use carrier email gateways. Every carrier converts emails sent to `yournumber@carrier-gateway.com` into SMS texts — completely free.
+
+**Gmail Setup (recommended):**
+1. Enable 2-Factor Authentication on your Google account
+2. Go to https://myaccount.google.com/apppasswords
+3. Create an app password for "Mail"
+4. Copy the 16-character password (e.g., `abcd efgh ijkl mnop`)
+
+**Find your carrier gateway:**
+
+| Carrier | Gateway Format |
+|---------|---------------|
+| AT&T | number@txt.att.net |
+| T-Mobile / Mint | number@tmomail.net |
+| Verizon / Visible | number@vtext.com |
+| Sprint | number@messaging.sprintpcs.com |
+| Cricket | number@sms.cricketwireless.net |
+| Metro PCS | number@mymetropcs.com |
+| Boost Mobile | number@sms.myboostmobile.com |
+| Google Fi | number@msg.fi.google.com |
+| US Cellular | number@email.uscc.net |
+| Rogers (CA) | number@pcs.rogers.com |
+| Bell (CA) | number@txt.bell.ca |
+| Telus (CA) | number@msg.telus.com |
+
+In your `.env`, just specify the carrier name (e.g., `verizon`, `att`, `tmobile`) and the tracker handles the rest.
 
 ### 3. Configure
 
@@ -341,20 +370,25 @@ The tracker helps you **automate the monitoring** so you don't miss these window
 | Issue | Solution |
 |-------|----------|
 | "No platform fetchers initialized" | Check your SeatGeek API key in .env |
-| SMS not sending | Run `python main.py --test-sms` and check Twilio console for errors |
+| SMS not sending | Run `python main.py --test-sms`; check email/password and carrier name |
+| SMTP authentication failed | For Gmail, use an App Password (not your regular password). Enable 2FA first |
+| SMS delayed or not received | Check carrier name is correct; try sending a test email directly to the gateway |
 | StubHub returning no results | Cloudflare may be blocking; try again in a few minutes |
 | "Rate limit reached" | Reduce `check_interval_minutes` or increase `max_alerts_per_hour` |
 | No listings found | Try a broader search query or remove city/state filters |
 | TickPick/Gametime not returning data | Sites may have updated their HTML structure; check logs |
 | Ticketmaster API errors | Verify your API key; free tier allows 5 requests/second |
+| "Unsupported carrier" error | Check spelling matches one of: att, tmobile, verizon, sprint, etc. |
 
 ## Cost
 
 - **SeatGeek API**: Free (1000 req/day)
 - **Ticketmaster API**: Free (5000 req/day, optional)
 - **TickPick/Gametime/StubHub/VividSeats scraping**: Free
-- **Twilio SMS**: ~$0.0079/message (free trial has $15 credit = ~1900 messages)
+- **SMS Alerts**: FREE (Email-to-SMS gateway — uses your existing email, no paid service)
 - **Server/hosting**: Free if running on your own machine; ~$5/month on a VPS
+
+**Total cost: $0** (unless you want a VPS for 24/7 uptime)
 
 ## License
 

@@ -52,18 +52,28 @@ platforms:
     api_key: "${TICKETMASTER_API_KEY}"
 
 # ============================================================
-# ALERTS - SMS notification settings
+# ALERTS - SMS notification settings (FREE via Email-to-SMS Gateway)
 # ============================================================
 alerts:
   sms:
     enabled: true
-    # Twilio credentials - sign up at https://www.twilio.com
-    # Free trial gives $15 credit (~1900 SMS messages)
-    # Or set via environment variables (see .env.example)
-    account_sid: "${TWILIO_ACCOUNT_SID}"
-    auth_token: "${TWILIO_AUTH_TOKEN}"
-    from_number: "${TWILIO_FROM_NUMBER}"    # Your Twilio number, e.g., "+15551234567"
-    to_number: "${TWILIO_TO_NUMBER}"        # Your phone number, e.g., "+15559876543"
+
+    # --- Your Email (sends the SMS via gateway) ---
+    # For Gmail: enable 2FA, then create an App Password at:
+    # https://myaccount.google.com/apppasswords
+    # Do NOT use your regular Gmail password — it won't work.
+    smtp_email: "${SMTP_EMAIL}"            # e.g., "you@gmail.com"
+    smtp_password: "${SMTP_PASSWORD}"      # Gmail App Password (16 chars, no spaces)
+    smtp_provider: "gmail"                 # gmail, outlook, yahoo, icloud, aol, zoho
+
+    # --- Your Phone ---
+    phone_number: "${PHONE_NUMBER}"        # e.g., "5551234567" (no +1, no dashes)
+    carrier: "${PHONE_CARRIER}"            # See supported carriers below
+
+    # Supported carriers:
+    #   US: att, tmobile, verizon, sprint, uscellular, metropcs, boost,
+    #       cricket, mint, googlefi, visible, xfinity, straight_talk
+    #   Canada: rogers, bell, telus, fido, koodo
 
     # Rate limiting - max alerts per hour (prevents spam)
     max_alerts_per_hour: 5

@@ -1,25 +1,59 @@
 """
-SMS Alert system using Twilio.
+SMS Alert system using Email-to-SMS Gateway (FREE).
 
-Sends price drop notifications and deal alerts via SMS.
-Includes rate limiting to avoid spamming, message formatting
-optimized for SMS character limits, and delivery tracking.
+Sends price drop notifications and deal alerts via SMS by routing
+emails through carrier SMS gateways. This is 100% free — no Twilio,
+no paid services, just your existing email account.
 
-Twilio Setup:
-1. Sign up at https://www.twilio.com (free trial gives you $15 credit)
-2. Get your Account SID and Auth Token from the console
-3. Get a Twilio phone number (or use the trial number)
-4. Verify your personal phone number (required on free tier)
+How it works:
+- Every US carrier has an email-to-SMS gateway (e.g., number@txt.att.net)
+- You send an email TO that address, and it arrives as a text message
+- Works with Gmail, Outlook, Yahoo, or any SMTP-capable email provider
 
-Pricing: ~$0.0079/SMS in the US (about 1 cent per message)
+Setup:
+1. Know your phone number and carrier
+2. Use a Gmail account (or any email with SMTP access)
+3. For Gmail: enable "App Passwords" (requires 2FA enabled)
+   - Go to: https://myaccount.google.com/apppasswords
+   - Create an app password for "Mail"
+4. That's it — completely free, unlimited messages
+
+Supported Carriers (US):
+- AT&T: number@txt.att.net
+- T-Mobile: number@tmomail.net
+- Verizon: number@vtext.com
+- Sprint: number@messaging.sprintpcs.com
+- US Cellular: number@email.uscc.net
+- Metro PCS: number@mymetropcs.com
+- Boost Mobile: number@sms.myboostmobile.com
+- Cricket: number@sms.cricketwireless.net
+- Mint Mobile: number@tmomail.net (uses T-Mobile network)
+- Google Fi: number@msg.fi.google.com
+- Visible: number@vtext.com (uses Verizon network)
+- Xfinity Mobile: number@vtext.com (uses Verizon network)
+
+Supported Carriers (Canada):
+- Rogers: number@pcs.rogers.com
+- Bell: number@txt.bell.ca
+- Telus: number@msg.telus.com
+- Fido: number@fido.ca
+- Koodo: number@msg.telus.com
+
+Limitations:
+- SMS messages limited to 160 characters per segment
+- Most carriers concatenate up to ~5 segments (800 chars)
+- Some carriers may strip formatting or truncate
+- Delivery is usually instant but can occasionally delay 1-2 min
+- MMS (picture messages) use different gateway addresses
 """
 
 import logging
+import smtplib
+import ssl
 from datetime import datetime, timedelta
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from typing import Optional
-
-from twilio.rest import Client
-from twilio.base.exceptions import TwilioRestException
 
 from ..fetchers.base import TicketListing
 from ..utils.fee_calculator import FeeCalculator, ComparisonResult
@@ -27,45 +61,153 @@ from ..utils.fee_calculator import FeeCalculator, ComparisonResult
 logger = logging.getLogger(__name__)
 
 
+# Email-to-SMS gateway addresses by carrier
+CARRIER_GATEWAYS = {
+    # US Carriers
+    "att": "{number}@txt.att.net",
+    "tmobile": "{number}@tmomail.net",
+    "verizon": "{number}@vtext.com",
+    "sprint": "{number}@messaging.sprintpcs.com",
+    "uscellular": "{number}@email.uscc.net",
+    "metropcs": "{number}@mymetropcs.com",
+    "boost": "{number}@sms.myboostmobile.com",
+    "cricket": "{number}@sms.cricketwireless.net",
+    "mint": "{number}@tmomail.net",  # T-Mobile MVNO
+    "googlefi": "{number}@msg.fi.google.com",
+    "visible": "{number}@vtext.com",  # Verizon MVNO
+    "xfinity": "{number}@vtext.com",  # Verizon MVNO
+    "straight_talk": "{number}@vtext.com",  # Usually Verizon
+    "consumer_cellular": "{number}@mailmymobile.net",
+    # Canada
+    "rogers": "{number}@pcs.rogers.com",
+    "bell": "{number}@txt.bell.ca",
+    "telus": "{number}@msg.telus.com",
+    "fido": "{number}@fido.ca",
+    "koodo": "{number}@msg.telus.com",
+}
+
+# Common SMTP server configurations
+SMTP_SERVERS = {
+    "gmail": {"host": "smtp.gmail.com", "port": 587, "tls": True},
+    "outlook": {"host": "smtp.office365.com", "port": 587, "tls": True},
+    "yahoo": {"host": "smtp.mail.yahoo.com", "port": 587, "tls": True},
+    "icloud": {"host": "smtp.mail.me.com", "port": 587, "tls": True},
+    "aol": {"host": "smtp.aol.com", "port": 587, "tls": True},
+    "zoho": {"host": "smtp.zoho.com", "port": 587, "tls": True},
+}
+
+
+def get_sms_gateway(phone_number: str, carrier: str) -> Optional[str]:
+    """
+    Get the SMS gateway email address for a phone number and carrier.
+
+    Args:
+        phone_number: 10-digit phone number (e.g., '5551234567')
+        carrier: Carrier name (e.g., 'att', 'tmobile', 'verizon')
+
+    Returns:
+        Gateway email address or None if carrier not supported.
+    """
+    # Clean the phone number - remove everything except digits
+    clean_number = "".join(c for c in phone_number if c.isdigit())
+
+    # Remove country code if present (US = 1)
+    if len(clean_number) == 11 and clean_number.startswith("1"):
+        clean_number = clean_number[1:]
+
+    carrier_lower = carrier.lower().replace(" ", "").replace("-", "_")
+
+    gateway_template = CARRIER_GATEWAYS.get(carrier_lower)
+    if not gateway_template:
+        logger.error(
+            f"Unsupported carrier: '{carrier}'. "
+            f"Supported: {', '.join(sorted(CARRIER_GATEWAYS.keys()))}"
+        )
+        return None
+
+    return gateway_template.format(number=clean_number)
+
+
 class SMSAlert:
     """
     SMS notification system for ticket price alerts.
-    Uses Twilio to send SMS messages when prices hit targets.
+    Uses Email-to-SMS gateway (completely free) to send text messages.
     """
 
-    # SMS character limit (standard SMS is 160, but Twilio handles multipart)
-    MAX_SMS_LENGTH = 1600  # Twilio supports up to 1600 chars (concatenated)
-    RECOMMENDED_LENGTH = 480  # 3 standard SMS segments for readability
+    # SMS character limits via email gateway
+    MAX_SMS_LENGTH = 800  # ~5 SMS segments concatenated
+    RECOMMENDED_LENGTH = 450  # 3 segments for best readability
 
     def __init__(
         self,
-        account_sid: str,
-        auth_token: str,
-        from_number: str,
-        to_number: str,
+        smtp_email: str,
+        smtp_password: str,
+        phone_number: str,
+        carrier: str,
+        smtp_provider: str = "gmail",
+        smtp_host: Optional[str] = None,
+        smtp_port: Optional[int] = None,
         max_alerts_per_hour: int = 5,
         quiet_hours: tuple = (23, 7),  # Don't send between 11PM and 7AM
     ):
         """
-        Initialize SMS alert system.
+        Initialize SMS alert system via email-to-SMS gateway.
 
         Args:
-            account_sid: Twilio Account SID
-            auth_token: Twilio Auth Token
-            from_number: Twilio phone number (e.g., '+15551234567')
-            to_number: Your phone number to receive alerts (e.g., '+15559876543')
+            smtp_email: Your email address (e.g., 'you@gmail.com')
+            smtp_password: Your email password or app password
+                           For Gmail: use App Password (not your regular password)
+                           https://myaccount.google.com/apppasswords
+            phone_number: Your phone number (e.g., '5551234567' or '+15551234567')
+            carrier: Your phone carrier (e.g., 'att', 'tmobile', 'verizon')
+                     See CARRIER_GATEWAYS for full list
+            smtp_provider: Email provider ('gmail', 'outlook', 'yahoo', etc.)
+                           Or use smtp_host/smtp_port for custom SMTP
+            smtp_host: Custom SMTP host (overrides smtp_provider)
+            smtp_port: Custom SMTP port (overrides smtp_provider)
             max_alerts_per_hour: Rate limit for alerts
             quiet_hours: Tuple of (start_hour, end_hour) for quiet period
         """
-        self.client = Client(account_sid, auth_token)
-        self.from_number = from_number
-        self.to_number = to_number
+        self.smtp_email = smtp_email
+        self.smtp_password = smtp_password
+        self.phone_number = phone_number
+        self.carrier = carrier
         self.max_alerts_per_hour = max_alerts_per_hour
         self.quiet_hours = quiet_hours
+
+        # Resolve SMTP server config
+        if smtp_host and smtp_port:
+            self.smtp_host = smtp_host
+            self.smtp_port = smtp_port
+            self.smtp_tls = True
+        else:
+            provider_config = SMTP_SERVERS.get(smtp_provider.lower())
+            if not provider_config:
+                raise ValueError(
+                    f"Unknown SMTP provider: '{smtp_provider}'. "
+                    f"Supported: {', '.join(SMTP_SERVERS.keys())}. "
+                    f"Or provide smtp_host and smtp_port directly."
+                )
+            self.smtp_host = provider_config["host"]
+            self.smtp_port = provider_config["port"]
+            self.smtp_tls = provider_config["tls"]
+
+        # Resolve SMS gateway address
+        self.sms_gateway = get_sms_gateway(phone_number, carrier)
+        if not self.sms_gateway:
+            raise ValueError(
+                f"Could not resolve SMS gateway for carrier '{carrier}'. "
+                f"Supported carriers: {', '.join(sorted(CARRIER_GATEWAYS.keys()))}"
+            )
 
         # Track sent messages for rate limiting
         self._sent_timestamps: list[datetime] = []
         self._fee_calculator = FeeCalculator()
+
+        logger.info(
+            f"SMS alerts initialized via email gateway. "
+            f"Gateway: {self.sms_gateway}, Provider: {smtp_provider}"
+        )
 
     def _is_quiet_hours(self) -> bool:
         """Check if current time is within quiet hours."""
@@ -88,34 +230,60 @@ class SMSAlert:
 
     def _send_sms(self, body: str) -> Optional[str]:
         """
-        Send an SMS message via Twilio.
+        Send an SMS message via email-to-SMS gateway.
 
         Returns:
-            Message SID if successful, None if failed.
+            A message ID string if successful, None if failed.
         """
         # Enforce length limit
         if len(body) > self.MAX_SMS_LENGTH:
             body = body[: self.MAX_SMS_LENGTH - 3] + "..."
 
         try:
-            message = self.client.messages.create(
-                body=body,
-                from_=self.from_number,
-                to=self.to_number,
-            )
+            # Create the email message
+            msg = MIMEMultipart()
+            msg["From"] = self.smtp_email
+            msg["To"] = self.sms_gateway
+            # Leave subject empty - it would add noise to SMS
+            msg["Subject"] = ""
+
+            # Attach the body as plain text
+            msg.attach(MIMEText(body, "plain"))
+
+            # Connect and send via SMTP
+            context = ssl.create_default_context()
+
+            with smtplib.SMTP(self.smtp_host, self.smtp_port) as server:
+                if self.smtp_tls:
+                    server.starttls(context=context)
+                server.login(self.smtp_email, self.smtp_password)
+                server.sendmail(
+                    self.smtp_email, self.sms_gateway, msg.as_string()
+                )
+
+            # Generate a message ID for tracking
+            msg_id = f"sms_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{id(msg)}"
             self._sent_timestamps.append(datetime.now())
+
             logger.info(
-                f"SMS sent successfully. SID: {message.sid}, "
-                f"To: {self.to_number}"
+                f"SMS sent via email gateway. "
+                f"To: {self.sms_gateway}, ID: {msg_id}"
             )
-            return message.sid
-        except TwilioRestException as e:
-            logger.error(f"Twilio error sending SMS: {e.msg}")
+            return msg_id
+
+        except smtplib.SMTPAuthenticationError as e:
+            logger.error(
+                f"SMTP authentication failed. "
+                f"If using Gmail, make sure you're using an App Password "
+                f"(not your regular password). Error: {e}"
+            )
+            return None
+        except smtplib.SMTPException as e:
+            logger.error(f"SMTP error sending SMS: {e}")
             return None
         except Exception as e:
-            logger.error(f"Unexpected error sending SMS: {e}")
+            logger.error(f"Unexpected error sending SMS via email: {e}")
             return None
-
 
     def send_price_drop_alert(
         self,
@@ -134,7 +302,7 @@ class SMSAlert:
             force: If True, bypass quiet hours and rate limits
 
         Returns:
-            Message SID if sent, None otherwise.
+            Message ID if sent, None otherwise.
         """
         if not force:
             if self._is_quiet_hours():
@@ -144,7 +312,6 @@ class SMSAlert:
                 logger.info("Skipping alert - rate limit reached")
                 return None
 
-        # Format the message
         body = self._format_price_drop_message(listing, target_price, trend_info)
         return self._send_sms(body)
 
@@ -165,7 +332,7 @@ class SMSAlert:
             force: If True, bypass quiet hours and rate limits
 
         Returns:
-            Message SID if sent, None otherwise.
+            Message ID if sent, None otherwise.
         """
         if not force:
             if self._is_quiet_hours():
@@ -193,7 +360,7 @@ class SMSAlert:
             force: If True, bypass quiet hours and rate limits
 
         Returns:
-            Message SID if sent, None otherwise.
+            Message ID if sent, None otherwise.
         """
         if not force:
             if self._is_quiet_hours():
@@ -207,9 +374,9 @@ class SMSAlert:
         body = (
             f"NEW LOW PRICE!\n"
             f"{listing.event_name}\n"
-            f"${listing.total_price_per_ticket:.0f}/ticket on {listing.platform}\n"
-            f"Down ${savings:.0f} ({savings_pct:.0f}%) from previous low\n"
-            f"Section: {listing.section}\n"
+            f"${listing.total_price_per_ticket:.0f}/ea on {listing.platform}\n"
+            f"Down ${savings:.0f} ({savings_pct:.0f}%) from prev low\n"
+            f"Sec: {listing.section}\n"
             f"{listing.url}"
         )
         return self._send_sms(body)
@@ -229,7 +396,7 @@ class SMSAlert:
             force: If True, bypass quiet hours and rate limits
 
         Returns:
-            Message SID if sent, None otherwise.
+            Message ID if sent, None otherwise.
         """
         if not force:
             if self._is_quiet_hours():
@@ -246,19 +413,17 @@ class SMSAlert:
             reason = f"Prices UP {change_pct:.0f}% - buy before higher"
         elif "current_vs_average" in trend_info:
             below_avg = abs(trend_info["current_vs_average"])
-            reason = f"Currently {below_avg:.0f}% below average"
+            reason = f"{below_avg:.0f}% below average"
 
         body = (
             f"BUY RECOMMENDATION\n"
             f"{listing.event_name}\n"
-            f"${listing.total_price_per_ticket:.0f}/ticket ({listing.platform})\n"
+            f"${listing.total_price_per_ticket:.0f}/ea ({listing.platform})\n"
             f"{reason}\n"
-            f"Avg price: ${avg_price:.0f}\n"
-            f"Section: {listing.section}\n"
+            f"Avg: ${avg_price:.0f} | Sec: {listing.section}\n"
             f"{listing.url}"
         )
         return self._send_sms(body)
-
 
     def _format_price_drop_message(
         self,
@@ -271,27 +436,23 @@ class SMSAlert:
         below_pct = (below_target / target_price) * 100
 
         lines = [
-            f"PRICE DROP ALERT!",
+            f"PRICE DROP!",
             f"{listing.event_name}",
-            f"${listing.total_price_per_ticket:.0f}/ticket (all-in) on {listing.platform}",
-            f"${below_target:.0f} BELOW your ${target_price:.0f} target ({below_pct:.0f}% under)",
-            f"Section: {listing.section}",
+            f"${listing.total_price_per_ticket:.0f}/ea (all-in) on {listing.platform}",
+            f"${below_target:.0f} BELOW ${target_price:.0f} target ({below_pct:.0f}% under)",
+            f"Sec: {listing.section}",
         ]
 
         if listing.row:
             lines.append(f"Row: {listing.row}")
 
-        lines.append(f"Qty: {listing.quantity}")
-
-        # Add trend context if available
+        # Add trend context (brief for SMS)
         if trend_info:
             direction = trend_info.get("direction", "")
             if direction == "dropping":
-                lines.append(f"Trend: Prices dropping (may go lower)")
+                lines.append("Trend: Dropping")
             elif direction == "rising":
-                lines.append(f"Trend: Prices rising - ACT FAST")
-            elif direction == "stable":
-                lines.append(f"Trend: Prices stable")
+                lines.append("Trend: Rising - ACT FAST")
 
         lines.append(f"{listing.url}")
 
@@ -307,21 +468,17 @@ class SMSAlert:
         if not results:
             return f"No deals found for {event_name}"
 
-        lines = [f"DEAL COMPARISON: {event_name}", ""]
+        lines = [f"DEALS: {event_name}"]
 
-        # Show top 3 deals
+        # Show top 3 deals (compact format for SMS)
         for i, result in enumerate(results[:3], 1):
             listing = result.listing
-            lines.append(
-                f"{i}. {listing.platform}: "
-                f"${result.true_cost_per_ticket:.0f}/ea (all-in)"
-            )
-            lines.append(f"   {listing.section}")
+            fee_str = ""
             if result.fee_amount_per_ticket > 0:
-                lines.append(
-                    f"   (Listed ${listing.price_per_ticket:.0f} + "
-                    f"${result.fee_amount_per_ticket:.0f} fees)"
-                )
+                fee_str = f" (+${result.fee_amount_per_ticket:.0f} fee)"
+            lines.append(
+                f"{i}. {listing.platform}: ${result.true_cost_per_ticket:.0f}/ea{fee_str}"
+            )
 
         # Best deal summary
         best = results[0]
@@ -329,17 +486,14 @@ class SMSAlert:
             worst = results[-1]
             savings = worst.true_cost_per_ticket - best.true_cost_per_ticket
             if savings > 0:
-                lines.append("")
                 lines.append(
-                    f"BEST: {best.listing.platform} saves "
-                    f"${savings * best.listing.quantity:.0f} total"
+                    f"Save ${savings:.0f}/ea with {best.listing.platform}"
                 )
 
-        # Target price context
         if target_price and best.true_cost_per_ticket <= target_price:
-            lines.append(f"BELOW your ${target_price:.0f} target!")
+            lines.append(f"BELOW ${target_price:.0f} target!")
 
-        lines.append(f"\n{best.listing.url}")
+        lines.append(f"{best.listing.url}")
 
         return "\n".join(lines)
 
@@ -349,14 +503,14 @@ class SMSAlert:
         Bypasses all rate limits and quiet hours.
 
         Returns:
-            Message SID if successful, None if failed.
+            Message ID if successful, None if failed.
         """
         body = (
-            "Ticket Price Tracker - TEST MESSAGE\n"
-            "Your SMS alerts are configured correctly!\n"
-            f"Alerts will be sent to: {self.to_number}\n"
-            f"Max alerts/hour: {self.max_alerts_per_hour}\n"
-            f"Quiet hours: {self.quiet_hours[0]}:00 - {self.quiet_hours[1]}:00"
+            "Ticket Price Tracker\n"
+            "SMS alerts working!\n"
+            f"Gateway: {self.sms_gateway}\n"
+            f"Max/hr: {self.max_alerts_per_hour}\n"
+            f"Quiet: {self.quiet_hours[0]}:00-{self.quiet_hours[1]}:00"
         )
         return self._send_sms(body)
 
@@ -368,8 +522,11 @@ class SMSAlert:
         )
 
         return {
-            "to_number": self.to_number,
-            "from_number": self.from_number,
+            "phone_number": self.phone_number,
+            "carrier": self.carrier,
+            "sms_gateway": self.sms_gateway,
+            "smtp_email": self.smtp_email,
+            "smtp_host": self.smtp_host,
             "alerts_sent_last_hour": recent_count,
             "max_alerts_per_hour": self.max_alerts_per_hour,
             "rate_limited": self._is_rate_limited(),
