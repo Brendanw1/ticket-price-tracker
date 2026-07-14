@@ -76,7 +76,47 @@ class SeatGeekFetcher(BaseFetcher):
         - concert: concert
         - theater: theater, broadway
         """
-        params = {"q": search.query, "per_page": 25}
+        # SeatGeek's API works best with performer names rather than
+        # "Team A vs Team B" format. Try the full query first, then
+        # fall back to searching individual performer/team names.
+        events = self._search_with_query(search, search.query)
+
+        # If no results, try splitting "X vs Y" or "X Vs Y" queries
+        if not events and self._is_versus_query(search.query):
+            parts = self._split_versus_query(search.query)
+            for part in parts:
+                events = self._search_with_query(search, part)
+                if events:
+                    break
+
+        # If still no results, try with just the first word(s) (team/artist name)
+        if not events:
+            # Try first meaningful part (skip common words)
+            words = search.query.split()
+            if len(words) > 1:
+                # Try first team name (everything before vs/at/-)
+                first_part = words[0] if len(words[0]) > 3 else " ".join(words[:2])
+                events = self._search_with_query(search, first_part)
+
+        logger.info(f"SeatGeek found {len(events)} events for '{search.query}'")
+        return events
+
+    @staticmethod
+    def _is_versus_query(query: str) -> bool:
+        """Check if query is a 'Team A vs Team B' format."""
+        import re
+        return bool(re.search(r'\b(?:vs\.?|versus|at)\b', query, re.IGNORECASE))
+
+    @staticmethod
+    def _split_versus_query(query: str) -> list[str]:
+        """Split a 'Team A vs Team B' query into individual team names."""
+        import re
+        parts = re.split(r'\s+(?:vs\.?|versus|at)\s+', query, flags=re.IGNORECASE)
+        return [p.strip() for p in parts if p.strip()]
+
+    def _search_with_query(self, search: EventSearch, query: str) -> list[dict]:
+        """Execute a search with a specific query string."""
+        params = {"q": query, "per_page": 25}
 
         # Add location filter
         if search.city:
@@ -133,7 +173,6 @@ class SeatGeekFetcher(BaseFetcher):
             }
             events.append(event_info)
 
-        logger.info(f"SeatGeek found {len(events)} events for '{search.query}'")
         return events
 
     def get_listings(self, event_id: str, quantity: int = 2) -> list[TicketListing]:

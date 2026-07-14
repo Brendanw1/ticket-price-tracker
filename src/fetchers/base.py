@@ -106,8 +106,32 @@ class BaseFetcher(ABC):
     ) -> list[TicketListing]:
         """
         Search for events and return the best deals across all matches.
+        If no events found with original query and it's a "vs" query,
+        tries individual team/performer names.
         """
+        import re
+
         events = self.search_events(search)
+
+        # If no events found and query has "vs"/"at", try individual names
+        if not events and re.search(r'\b(?:vs\.?|versus|at)\b', search.query, re.IGNORECASE):
+            parts = re.split(r'\s+(?:vs\.?|versus|at)\s+', search.query, flags=re.IGNORECASE)
+            parts = [p.strip() for p in parts if p.strip()]
+            for part in parts:
+                alt_search = EventSearch(
+                    query=part,
+                    city=search.city,
+                    state=search.state,
+                    date_from=search.date_from,
+                    date_to=search.date_to,
+                    quantity=search.quantity,
+                    max_price=search.max_price,
+                    event_type=search.event_type,
+                )
+                events = self.search_events(alt_search)
+                if events:
+                    break
+
         all_listings = []
 
         for event in events[:5]:  # Limit to first 5 matching events
