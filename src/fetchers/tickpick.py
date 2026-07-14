@@ -73,9 +73,14 @@ class TickPickFetcher(BaseFetcher):
         """Fetch a page with retry logic."""
         try:
             response = self.scraper.get(url, timeout=30)
+            if response.status_code in (404, 403):
+                logger.debug(f"TickPick {response.status_code}: {url}")
+                return None
             response.raise_for_status()
             return response.text
         except Exception as e:
+            if "404" in str(e) or "403" in str(e):
+                return None
             logger.warning(f"TickPick fetch failed for {url}: {e}")
             raise
 
@@ -85,6 +90,8 @@ class TickPickFetcher(BaseFetcher):
         try:
             self.scraper.headers.update({"Accept": "application/json"})
             response = self.scraper.get(url, params=params, timeout=30)
+            if response.status_code in (404, 403):
+                return None
             response.raise_for_status()
             return response.json()
         except Exception as e:

@@ -78,9 +78,15 @@ class StubHubFetcher(BaseFetcher):
         """Fetch a page with retry logic and anti-bot handling."""
         try:
             response = self.scraper.get(url, timeout=30)
+            # Don't retry on 404/403 — these are definitive, not transient
+            if response.status_code in (404, 403):
+                logger.debug(f"StubHub {response.status_code}: {url}")
+                return None
             response.raise_for_status()
             return response.text
         except Exception as e:
+            if "404" in str(e) or "403" in str(e):
+                return None
             logger.warning(f"StubHub fetch failed for {url}: {e}")
             raise
 
