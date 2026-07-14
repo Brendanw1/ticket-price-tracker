@@ -24,6 +24,16 @@ platforms:
     client_id: "${SEATGEEK_CLIENT_ID}"
     client_secret: "${SEATGEEK_CLIENT_SECRET}"  # Optional, for higher rate limits
 
+  tickpick:
+    enabled: true
+    # No API key needed (uses web scraping)
+    # ZERO buyer fees - often the cheapest option
+
+  gametime:
+    enabled: true
+    # No API key needed (uses web scraping + internal API)
+    # Specializes in last-minute deals (24-72h before events)
+
   stubhub:
     enabled: true
     # No API key needed (uses web scraping)
@@ -32,6 +42,14 @@ platforms:
   vividseats:
     enabled: true
     # No API key needed (uses web scraping + internal API)
+
+  ticketmaster:
+    enabled: true
+    # Optional: Ticketmaster Discovery API key for better event search
+    # Get free key at: https://developer.ticketmaster.com/
+    # Or set TICKETMASTER_API_KEY environment variable
+    # Works without key (scraping), but API gives 5000 calls/day
+    api_key: "${TICKETMASTER_API_KEY}"
 
 # ============================================================
 # ALERTS - SMS notification settings

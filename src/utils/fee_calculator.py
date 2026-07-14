@@ -6,12 +6,13 @@ accounting for each platform's different fee structures. This is critical
 because a $100 ticket on SeatGeek (all-in) is NOT the same as a $100
 ticket on StubHub (which becomes ~$127 after fees).
 
-Platform Fee Summary:
+Platform Fee Summary (6 platforms):
 - SeatGeek: All-in pricing (fees included in listed price)
-- StubHub: ~25% buyer fee + $7.95 order processing
+- TickPick: All-in pricing (ZERO buyer fees - sellers pay fees)
+- Gametime: All-in pricing (last-minute deals specialist)
 - Vivid Seats: ~22% service fee
-- Ticketmaster Resale: ~20-25% service fee + $5-15 order fee
-- Gametime: All-in pricing (similar to SeatGeek)
+- Ticketmaster Resale: ~22% service fee + $8.50 order fee
+- StubHub: ~25% buyer fee + $7.95 order processing
 """
 
 import logging
@@ -75,13 +76,21 @@ PLATFORM_FEES = {
         delivery_fee=0.0,
         notes="All-in pricing - what you see is what you pay",
     ),
-    "StubHub": PlatformFeeStructure(
-        platform_name="StubHub",
-        is_all_in_pricing=False,
-        buyer_fee_percent=0.25,
-        order_processing_fee=7.95,
+    "TickPick": PlatformFeeStructure(
+        platform_name="TickPick",
+        is_all_in_pricing=True,
+        buyer_fee_percent=0.0,
+        order_processing_fee=0.0,
         delivery_fee=0.0,
-        notes="~25% buyer service fee + $7.95 order processing",
+        notes="ZERO buyer fees - sellers pay all fees, listed price is final",
+    ),
+    "Gametime": PlatformFeeStructure(
+        platform_name="Gametime",
+        is_all_in_pricing=True,
+        buyer_fee_percent=0.0,
+        order_processing_fee=0.0,
+        delivery_fee=0.0,
+        notes="All-in pricing, specializes in last-minute deals & Zone Deals",
     ),
     "VividSeats": PlatformFeeStructure(
         platform_name="VividSeats",
@@ -95,17 +104,17 @@ PLATFORM_FEES = {
         platform_name="Ticketmaster",
         is_all_in_pricing=False,
         buyer_fee_percent=0.22,
-        order_processing_fee=8.00,
+        order_processing_fee=8.50,
         delivery_fee=0.0,
-        notes="~22% service fee + $8 order processing",
+        notes="~22% service fee + $8.50 order processing (official resale)",
     ),
-    "Gametime": PlatformFeeStructure(
-        platform_name="Gametime",
-        is_all_in_pricing=True,
-        buyer_fee_percent=0.0,
-        order_processing_fee=0.0,
+    "StubHub": PlatformFeeStructure(
+        platform_name="StubHub",
+        is_all_in_pricing=False,
+        buyer_fee_percent=0.25,
+        order_processing_fee=7.95,
         delivery_fee=0.0,
-        notes="All-in pricing, last-minute deals",
+        notes="~25% buyer service fee + $7.95 order processing",
     ),
 }
 

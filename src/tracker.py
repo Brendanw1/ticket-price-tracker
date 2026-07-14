@@ -2,8 +2,8 @@
 Main orchestrator for the Ticket Price Tracker.
 
 This module ties together all components:
-- Fetchers (SeatGeek, StubHub, Vivid Seats)
-- Fee Calculator (normalizes prices across platforms)
+- Fetchers (SeatGeek, StubHub, Vivid Seats, TickPick, Gametime, Ticketmaster)
+- Fee Calculator (normalizes prices across 6 platforms)
 - Price History (tracks trends over time)
 - SMS Alerts (sends notifications when targets are hit)
 
@@ -23,7 +23,14 @@ import yaml
 import schedule
 from dotenv import load_dotenv
 
-from .fetchers import SeatGeekFetcher, StubHubFetcher, VividSeatsFetcher
+from .fetchers import (
+    SeatGeekFetcher,
+    StubHubFetcher,
+    VividSeatsFetcher,
+    TickPickFetcher,
+    GametimeFetcher,
+    TicketmasterFetcher,
+)
 from .fetchers.base import EventSearch, TicketListing
 from .utils.fee_calculator import FeeCalculator
 from .utils.price_history import PriceHistory
@@ -92,6 +99,9 @@ class TicketTracker:
                 "seatgeek": {"enabled": True, "client_id": ""},
                 "stubhub": {"enabled": True},
                 "vividseats": {"enabled": True},
+                "tickpick": {"enabled": True},
+                "gametime": {"enabled": True},
+                "ticketmaster": {"enabled": True, "api_key": ""},
             },
             "alerts": {
                 "sms": {
@@ -115,7 +125,7 @@ class TicketTracker:
         self.active_fetchers = []
         platforms = self.config.get("platforms", {})
 
-        # SeatGeek
+        # SeatGeek (requires API key)
         sg_config = platforms.get("seatgeek", {})
         if sg_config.get("enabled", False) and sg_config.get("client_id"):
             try:
@@ -128,7 +138,27 @@ class TicketTracker:
             except Exception as e:
                 logger.error(f"Failed to init SeatGeek: {e}")
 
-        # StubHub
+        # TickPick (no API key needed - zero fees platform)
+        tp_config = platforms.get("tickpick", {})
+        if tp_config.get("enabled", True):
+            try:
+                fetcher = TickPickFetcher()
+                self.active_fetchers.append(fetcher)
+                logger.info("TickPick fetcher initialized")
+            except Exception as e:
+                logger.error(f"Failed to init TickPick: {e}")
+
+        # Gametime (no API key needed - last-minute deals)
+        gt_config = platforms.get("gametime", {})
+        if gt_config.get("enabled", True):
+            try:
+                fetcher = GametimeFetcher()
+                self.active_fetchers.append(fetcher)
+                logger.info("Gametime fetcher initialized")
+            except Exception as e:
+                logger.error(f"Failed to init Gametime: {e}")
+
+        # StubHub (no API key needed - web scraping)
         sh_config = platforms.get("stubhub", {})
         if sh_config.get("enabled", True):
             try:
@@ -138,7 +168,7 @@ class TicketTracker:
             except Exception as e:
                 logger.error(f"Failed to init StubHub: {e}")
 
-        # Vivid Seats
+        # Vivid Seats (no API key needed - web scraping)
         vs_config = platforms.get("vividseats", {})
         if vs_config.get("enabled", True):
             try:
@@ -147,6 +177,18 @@ class TicketTracker:
                 logger.info("Vivid Seats fetcher initialized")
             except Exception as e:
                 logger.error(f"Failed to init Vivid Seats: {e}")
+
+        # Ticketmaster Resale (optional API key for better results)
+        tm_config = platforms.get("ticketmaster", {})
+        if tm_config.get("enabled", True):
+            try:
+                fetcher = TicketmasterFetcher(
+                    api_key=tm_config.get("api_key") or None,
+                )
+                self.active_fetchers.append(fetcher)
+                logger.info("Ticketmaster Resale fetcher initialized")
+            except Exception as e:
+                logger.error(f"Failed to init Ticketmaster: {e}")
 
         if not self.active_fetchers:
             logger.warning("No platform fetchers initialized! Check config.")
