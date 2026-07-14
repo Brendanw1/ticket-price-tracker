@@ -1,0 +1,99 @@
+# ============================================================
+# Ticket Price Tracker - Configuration
+# ============================================================
+# Copy this file to config/config.yaml and fill in your values.
+# Sensitive values (API keys, tokens) can also be set via
+# environment variables or a .env file (see .env.example).
+# ============================================================
+
+# How often to check prices (in minutes)
+# Recommended: 30 for regular monitoring, 15 for events happening soon
+check_interval_minutes: 30
+
+# Where to store price history data
+data_path: "data/price_history.json"
+
+# ============================================================
+# PLATFORMS - Enable/disable and configure each source
+# ============================================================
+platforms:
+  seatgeek:
+    enabled: true
+    # Get your free API key at: https://seatgeek.com/account/develop
+    # Or set SEATGEEK_CLIENT_ID environment variable
+    client_id: "${SEATGEEK_CLIENT_ID}"
+    client_secret: "${SEATGEEK_CLIENT_SECRET}"  # Optional, for higher rate limits
+
+  stubhub:
+    enabled: true
+    # No API key needed (uses web scraping)
+    # Note: May occasionally be blocked by Cloudflare
+
+  vividseats:
+    enabled: true
+    # No API key needed (uses web scraping + internal API)
+
+# ============================================================
+# ALERTS - SMS notification settings
+# ============================================================
+alerts:
+  sms:
+    enabled: true
+    # Twilio credentials - sign up at https://www.twilio.com
+    # Free trial gives $15 credit (~1900 SMS messages)
+    # Or set via environment variables (see .env.example)
+    account_sid: "${TWILIO_ACCOUNT_SID}"
+    auth_token: "${TWILIO_AUTH_TOKEN}"
+    from_number: "${TWILIO_FROM_NUMBER}"    # Your Twilio number, e.g., "+15551234567"
+    to_number: "${TWILIO_TO_NUMBER}"        # Your phone number, e.g., "+15559876543"
+
+    # Rate limiting - max alerts per hour (prevents spam)
+    max_alerts_per_hour: 5
+
+    # Quiet hours - no alerts during this window (24-hour format)
+    quiet_hours_start: 23  # 11 PM
+    quiet_hours_end: 7     # 7 AM
+
+# ============================================================
+# WATCHED EVENTS - Events to monitor for price drops
+# ============================================================
+# Each event needs at minimum a 'query' field.
+# Add as many events as you want to track.
+#
+# Fields:
+#   query (required): Search string for the event
+#   max_price: Target price threshold - alerts fire below this (all-in per ticket)
+#   city: Filter by city
+#   state: Filter by state abbreviation
+#   quantity: Number of tickets needed (default: 2)
+#   event_type: "sports", "concert", or "theater"
+# ============================================================
+watched_events:
+  - query: "Lakers vs Celtics"
+    max_price: 150
+    city: "Los Angeles"
+    quantity: 2
+    event_type: "sports"
+
+  - query: "Taylor Swift"
+    max_price: 250
+    quantity: 2
+    event_type: "concert"
+
+  # - query: "Bad Bunny"
+  #   max_price: 180
+  #   city: "Miami"
+  #   quantity: 4
+  #   event_type: "concert"
+
+  # - query: "Yankees vs Red Sox"
+  #   max_price: 75
+  #   city: "New York"
+  #   quantity: 2
+  #   event_type: "sports"
+
+  # - query: "Hamilton"
+  #   max_price: 200
+  #   city: "New York"
+  #   quantity: 2
+  #   event_type: "theater"
