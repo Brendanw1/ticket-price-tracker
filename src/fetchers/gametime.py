@@ -96,9 +96,15 @@ class GametimeFetcher(BaseFetcher):
             response = self.scraper.get(
                 url, params=params, headers=headers, timeout=30
             )
+            # Don't retry on 404 — it's definitive, not transient
+            if response.status_code == 404:
+                logger.debug(f"Gametime 404: {url}")
+                return None
             response.raise_for_status()
             return response.json()
         except Exception as e:
+            if "404" in str(e):
+                return None  # Don't retry 404s
             logger.warning(f"Gametime API fetch failed: {e}")
             raise
 
@@ -302,6 +308,10 @@ class GametimeFetcher(BaseFetcher):
             item.get("id", item.get("eventId", item.get("event_id", "")))
         )
 
+        # Skip events with no valid ID — can't fetch listings without one
+        if not event_id or event_id == "None":
+            return None
+
         name = item.get("name", item.get("title", item.get("event_name", "")))
         if not name:
             # Try to build from performers
@@ -360,6 +370,11 @@ class GametimeFetcher(BaseFetcher):
         Gametime prices are ALL-IN - no fees added.
         Especially strong for last-minute deals.
         """
+        # Guard: skip if event_id is empty or invalid
+        if not event_id or event_id.strip() == "":
+            logger.warning("Gametime: skipping listings fetch — empty event_id")
+            return []
+
         # Try API first
         listings = self._get_listings_via_api(event_id, quantity)
         if listings:

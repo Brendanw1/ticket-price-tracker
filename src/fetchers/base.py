@@ -111,9 +111,20 @@ class BaseFetcher(ABC):
         all_listings = []
 
         for event in events[:5]:  # Limit to first 5 matching events
-            listings = self.get_listings(
-                event_id=event["event_id"], quantity=search.quantity
-            )
+            event_id = event.get("event_id", "")
+            # Skip events with empty/missing IDs
+            if not event_id or str(event_id).strip() == "":
+                continue
+            try:
+                listings = self.get_listings(
+                    event_id=str(event_id), quantity=search.quantity
+                )
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).debug(
+                    f"Error fetching listings for event '{event.get('event_name', '')}': {e}"
+                )
+                continue
             if search.max_price:
                 listings = [
                     l for l in listings if l.total_price_per_ticket <= search.max_price
