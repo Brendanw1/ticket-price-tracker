@@ -88,7 +88,42 @@ class TicketTracker:
         with open(path, "r") as f:
             config = yaml.safe_load(f)
 
-        return config or self._default_config()
+        config = config or self._default_config()
+
+        # Resolve ${ENV_VAR} references in config values
+        self._resolve_env_vars(config)
+
+        return config
+
+    def _resolve_env_vars(self, obj):
+        """
+        Recursively resolve ${ENV_VAR} references in config values.
+        Replaces strings like '${SEATGEEK_CLIENT_ID}' with the actual
+        environment variable value, or empty string if not set.
+        """
+        import re
+        import os
+
+        env_pattern = re.compile(r"^\$\{(\w+)\}$")
+
+        if isinstance(obj, dict):
+            for key, value in obj.items():
+                if isinstance(value, str):
+                    match = env_pattern.match(value)
+                    if match:
+                        env_name = match.group(1)
+                        obj[key] = os.environ.get(env_name, "")
+                elif isinstance(value, (dict, list)):
+                    self._resolve_env_vars(value)
+        elif isinstance(obj, list):
+            for i, item in enumerate(obj):
+                if isinstance(item, str):
+                    match = env_pattern.match(item)
+                    if match:
+                        env_name = match.group(1)
+                        obj[i] = os.environ.get(env_name, "")
+                elif isinstance(item, (dict, list)):
+                    self._resolve_env_vars(item)
 
     @staticmethod
     def _default_config() -> dict:
